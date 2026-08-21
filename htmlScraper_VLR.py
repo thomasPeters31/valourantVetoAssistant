@@ -102,7 +102,6 @@ def getAllMatchIDs(numPages):
     allIDs = []
     for page in range(1, numPages + 1):
         ids = getMatchIDs(page)
-        print(f"Page {page}: {len(ids)} matches")
         allIDs.extend(ids)
     return allIDs
 
@@ -127,7 +126,7 @@ def getMapResults(html):
         teamA = parseTeam(teams[0])
         teamB = parseTeam(teams[1])
         
-        entrty = {
+        entry = {
             "map": mapName,
             "team_a": teamA["name"],
             "score_a": teamA["score"],
@@ -140,7 +139,7 @@ def getMapResults(html):
             "winner": teamA["name"] if teamA["won"] else teamB["name"],
         }
         
-        results.append(entrty)
+        results.append(entry)
         
     return results
 
@@ -156,27 +155,33 @@ def parseTeam(teamDiv):
     }
     
 if __name__ == "__main__":
-    html = getHtml("https://www.vlr.gg/724644", "match_724644")
     
-    for entry in getMapResults(html):
-        print(entry)
-    
-    # ids = getAllMatchIDs(20)
-    
-    # allRows = []
-    
-    # for matchID in ids:
-    #     html = getHtml(f"https://www.vlr.gg/{matchID}", f"match_{matchID}")
-    #     veto = getVetoSequence(html)
-        
-    #     for entry in veto:
-    #         entry["matchID"] = matchID
-    #         allRows.append(entry)
-        
-    #     print(matchID, len(veto))
-        
-    # with open("vetoData.csv", "w", newline="") as f:
-    #     writer = csv.DictWriter(f, fieldnames=["matchID", "team", "action", "map"])
-    #     writer.writeheader()
-    #     writer.writerows(allRows)
-    # print(f"Total veto entries: {len(allRows)}, to vetoData.csv")
+    with open("vetoData.csv") as f:
+        ids = sorted({row["matchID"] for row in csv.DictReader(f)})
+
+    allRows = []
+
+    for matchID in ids:
+        html = getHtml(f"https://www.vlr.gg/{matchID}", f"match_{matchID}")
+        try:
+            maps = getMapResults(html)
+
+            for entry in maps:
+                entry["matchID"] = matchID
+                allRows.append(entry)
+
+            print(matchID, len(maps))
+        except Exception as e:
+            print(f"FAILED {matchID}: {type(e).__name__}: {e}")
+
+    with open("mapResults.csv", "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            "matchID", "map",
+            "team_a", "score_a", "attack_a", "defence_a",
+            "team_b", "score_b", "attack_b", "defence_b",
+            "winner",
+        ])
+        writer.writeheader()
+        writer.writerows(allRows)
+
+    print(f"Wrote {len(allRows)} rows to mapResults.csv")
