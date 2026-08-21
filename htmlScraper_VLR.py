@@ -52,20 +52,19 @@ def getVetoSequence(html):
     return veto
 
 
-def getHtml(match_id):
+def getHtml(url, cacheName):
     # Cache each match's HTML on disk by ID so re-running the script doesn't
     # re-fetch pages we've already scraped.
     os.makedirs("cache", exist_ok=True)
-    path = f"cache/{match_id}.html"
+    path = f"cache/{cacheName}.html"
 
     if os.path.exists(path):
         with open(path, "r") as f:
             return f.read()
-
-    url = f"https://www.vlr.gg/{match_id}"
+    
     response = requests.get(url, headers=HEADERS)
     if response.status_code != 200:
-        print(f"Failed to fetch {match_id}: {response.status_code}")
+        print(f"Failed to fetch {url}: {response.status_code}")
         return ""
 
     # Small delay so a batch of uncached match_ids doesn't hammer VLR.gg.
@@ -76,9 +75,27 @@ def getHtml(match_id):
 
     return response.text
 
+def getMatchIDs(pageNumber):
+    url = f"https://www.vlr.gg/matches/results?page={pageNumber}"
+    html = getHtml(url, f"results_page_{pageNumber}")
+    soup = BeautifulSoup(html, "html.parser")
+    
+    matchIDs = []
+    for card in soup.select("a.match-item"):
+        tags = card.select("div.match-item-vod div.wf-tag")
+        tagTexts = [t.getText(strip=True) for t in tags]
+        
+        if "Map" not in tagTexts:
+            continue  # Skip matches that don't have a map tag (e.g., unplayed matches)
+        
+        matchIDs.append(card['href'].split('/')[1])  # Extract match ID from URL
+
+    return matchIDs
 
 if __name__ == "__main__":
-    html = getHtml(729747)
-    veto = getVetoSequence(html)
-    for entry in veto:
-        print(entry)
+    ids = getMatchIDs(1)
+    
+    for match_id in ids:
+        html = getHtml(f"https://www.vlr.gg/{match_id}", f"match_{match_id}")
+        veto = getVetoSequence(html)
+        print(match_id, len(veto))
