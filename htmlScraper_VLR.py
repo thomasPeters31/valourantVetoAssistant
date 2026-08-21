@@ -63,9 +63,14 @@ def getHtml(url, cacheName, useCache=True):
         with open(path, "r") as f:
             return f.read()
     
-    response = requests.get(url, headers=HEADERS)
+    print(f"Fetching {cacheName}...")
+    try:
+        response = requests.get(url, headers=HEADERS, timeout=10)
+    except requests.exceptions.RequestException as e:
+        print(f"Request failed for {url}: {e}")
+        return ""
     # Small delay so a batch of uncached match_ids doesn't hammer VLR.gg.
-    time.sleep(1)
+    time.sleep(3)
     
     if response.status_code != 200:
         print(f"Failed to fetch {url}: {response.status_code}")
@@ -102,7 +107,7 @@ def getAllMatchIDs(numPages):
     return allIDs
 
 if __name__ == "__main__":
-    ids = getMatchIDs(2)
+    ids = getAllMatchIDs(20)
     
     allRows = []
     
