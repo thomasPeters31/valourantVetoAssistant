@@ -143,6 +143,23 @@ def getMapResults(html):
         
     return results
 
+def getMatchTeams(html):
+    soup = BeautifulSoup(html, "html.parser")
+    links = soup.select("a.match-header-link")
+
+    teams = []
+    for link in links:
+        teamID = link.get("href").split("/")[2]
+
+        # The name div sometimes holds a second div with a shorter display name
+        # alongside the registered one, so take just the first text node.
+        nameDiv = link.select_one("div.wf-title-med")
+        name = nameDiv.contents[0].strip()
+
+        teams.append({"teamID": teamID, "name": name})
+
+    return teams
+
 def parseTeam(teamDiv):
     scoreElement = teamDiv.select_one("div.score")
     
@@ -163,25 +180,66 @@ if __name__ == "__main__":
 
     for matchID in ids:
         html = getHtml(f"https://www.vlr.gg/{matchID}", f"match_{matchID}")
+
         try:
             maps = getMapResults(html)
+            headerTeams = getMatchTeams(html)
+
+            # Need both teams to attach IDs; TBD placeholders and forfeits
+            # can leave the header incomplete.
+            if len(headerTeams) != 2:
+                print(f"SKIP {matchID}: found {len(headerTeams)} header teams")
+                continue
 
             for entry in maps:
                 entry["matchID"] = matchID
+                entry["teamID_a"] = headerTeams[0]["teamID"]
+                entry["teamID_b"] = headerTeams[1]["teamID"]
                 allRows.append(entry)
 
             print(matchID, len(maps))
+
         except Exception as e:
             print(f"FAILED {matchID}: {type(e).__name__}: {e}")
 
     with open("mapResults.csv", "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=[
             "matchID", "map",
-            "team_a", "score_a", "attack_a", "defence_a",
-            "team_b", "score_b", "attack_b", "defence_b",
+            "teamID_a", "team_a", "score_a", "attack_a", "defence_a",
+            "teamID_b", "team_b", "score_b", "attack_b", "defence_b",
             "winner",
         ])
         writer.writeheader()
         writer.writerows(allRows)
 
     print(f"Wrote {len(allRows)} rows to mapResults.csv")
+    
+    # with open("vetoData.csv") as f:
+    #     ids = sorted({row["matchID"] for row in csv.DictReader(f)})
+
+    # allRows = []
+
+    # for matchID in ids:
+    #     html = getHtml(f"https://www.vlr.gg/{matchID}", f"match_{matchID}")
+    #     try:
+    #         maps = getMapResults(html)
+
+    #         for entry in maps:
+    #             entry["matchID"] = matchID
+    #             allRows.append(entry)
+
+    #         print(matchID, len(maps))
+    #     except Exception as e:
+    #         print(f"FAILED {matchID}: {type(e).__name__}: {e}")
+
+    # with open("mapResults.csv", "w", newline="") as f:
+    #     writer = csv.DictWriter(f, fieldnames=[
+    #         "matchID", "map",
+    #         "team_a", "score_a", "attack_a", "defence_a",
+    #         "team_b", "score_b", "attack_b", "defence_b",
+    #         "winner",
+    #     ])
+    #     writer.writeheader()
+    #     writer.writerows(allRows)
+
+    # print(f"Wrote {len(allRows)} rows to mapResults.csv")
