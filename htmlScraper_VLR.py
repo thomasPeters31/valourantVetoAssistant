@@ -119,6 +119,14 @@ def getMapResults(html):
         
         span = game.select_one("div.map span")
         mapName = span.contents[0].strip()
+        pickedSpan = span.select_one("span.picked")
+        
+        if pickedSpan is None:
+            pickedBy = None          # decider — neither team picked it
+        elif "mod-1" in pickedSpan.get("class", []):
+            pickedBy = "a"
+        else:
+            pickedBy = "b"
         
         header = game.select_one("div.vm-stats-game-header")
         teams = header.select("div.team")
@@ -128,6 +136,7 @@ def getMapResults(html):
         
         entry = {
             "map": mapName,
+            "pickedBy": pickedBy,
             "team_a": teamA["name"],
             "score_a": teamA["score"],
             "attack_a": teamA["attack"],
@@ -204,7 +213,7 @@ if __name__ == "__main__":
 
     with open("mapResults.csv", "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=[
-            "matchID", "map",
+            "matchID", "map", "pickedBy",
             "teamID_a", "team_a", "score_a", "attack_a", "defence_a",
             "teamID_b", "team_b", "score_b", "attack_b", "defence_b",
             "winner",
