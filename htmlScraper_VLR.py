@@ -8,6 +8,7 @@ HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 
 def getVetoSequence(html):
+    # Parses the map pick/ban sequence out of a match page's HTML.
 
     soup = BeautifulSoup(html, "html.parser")
     note = soup.select_one("div.match-header-note")
@@ -54,25 +55,28 @@ def getVetoSequence(html):
 
 
 def getHtml(url, cacheName, useCache=True):
-    # Cache each match's HTML on disk by ID so re-running the script doesn't
-    # re-fetch pages we've already scraped.
+    # Fetches a page's HTML, caching it on disk under cacheName so repeated
+    # runs don't re-request pages we've already scraped.
     os.makedirs("cache", exist_ok=True)
     path = f"cache/{cacheName}.html"
 
     if useCache and os.path.exists(path):
         with open(path, "r") as f:
             return f.read()
-    
+
     print(f"Fetching {cacheName}...")
     try:
         response = requests.get(url, headers=HEADERS, timeout=10)
     except requests.exceptions.RequestException as e:
+        # Network-level failure (timeout, DNS, connection reset, etc.) —
+        # give up on this page and let the caller deal with "".
         print(f"Request failed for {url}: {e}")
         return ""
-    # Small delay so a batch of uncached match_ids doesn't hammer VLR.gg.
+    # Small delay so a batch of uncached requests doesn't hammer VLR.gg.
     time.sleep(3)
-    
+
     if response.status_code != 200:
+        # e.g. 404/429/5xx — don't cache a bad response as if it were real data.
         print(f"Failed to fetch {url}: {response.status_code}")
         return ""
 
@@ -82,23 +86,30 @@ def getHtml(url, cacheName, useCache=True):
     return response.text
 
 def getMatchIDs(pageNumber):
+    # Scrapes one page of VLR's results listing for the match IDs on it.
     url = f"https://www.vlr.gg/matches/results?page={pageNumber}"
+    # useCache=False: this listing changes constantly as new results land,
+    # so a cached copy would quickly go stale.
     html = getHtml(url, f"results_page_{pageNumber}", useCache=False)
     soup = BeautifulSoup(html, "html.parser")
-    
+
     matchIDs = []
     for card in soup.select("a.match-item"):
+        # Each match card carries small tag chips (e.g. "Map", "VOD");
+        # only "Map"-tagged matches have completed map data to scrape.
         tags = card.select("div.match-item-vod div.wf-tag")
         tagTexts = [t.get_text(strip=True) for t in tags]
-        
+
         if "Map" not in tagTexts:
             continue  # Skip matches that don't have a map tag (e.g., unplayed matches)
-        
+
         matchIDs.append(card['href'].split('/')[1])  # Extract match ID from URL
 
     return matchIDs
 
 def getAllMatchIDs(numPages):
+    # Walks the results listing page by page (1-indexed) and flattens every
+    # match ID found into one list.
     allIDs = []
     for page in range(1, numPages + 1):
         ids = getMatchIDs(page)
@@ -106,34 +117,42 @@ def getAllMatchIDs(numPages):
     return allIDs
 
 def getMapResults(html):
+    # Parses the per-map scoreline/side-score breakdown from a match page
+    # (as opposed to getVetoSequence, which parses the pick/ban note).
     soup = BeautifulSoup(html, "html.parser")
     games = soup.select("div.vm-stats-game")
-    
+
     results = []
-    
+
     for game in games:
         gameID = game.get("data-game-id")
-        
+
         if gameID == "all":
             continue  # Skip the aggregate stats block
-        
+
+        # The map name is the first text node inside this span, ahead of
+        # any icon/badge markup (like the "picked" tag handled below).
         span = game.select_one("div.map span")
         mapName = span.contents[0].strip()
         pickedSpan = span.select_one("span.picked")
-        
+
+        # VLR tags whichever map a team picked with a "picked" span whose
+        # class marks which side (mod-1 = team A, mod-2 = team B) chose it.
+        # A map with no such span is the decider — neither team picked it.
         if pickedSpan is None:
             pickedBy = None          # decider — neither team picked it
         elif "mod-1" in pickedSpan.get("class", []):
             pickedBy = "a"
         else:
             pickedBy = "b"
-        
+
         header = game.select_one("div.vm-stats-game-header")
         teams = header.select("div.team")
-        
+
+        # VLR always lists exactly two teams per map header, in match order.
         teamA = parseTeam(teams[0])
         teamB = parseTeam(teams[1])
-        
+
         entry = {
             "map": mapName,
             "pickedBy": pickedBy,
@@ -147,12 +166,14 @@ def getMapResults(html):
             "defence_b": teamB["defence"],
             "winner": teamA["name"] if teamA["won"] else teamB["name"],
         }
-        
+
         results.append(entry)
-        
+
     return results
 
 def getMatchTeams(html):
+    # Pulls each team's ID and display name from the match header (as
+    # opposed to parseTeam, which reads a team's per-map score block).
     soup = BeautifulSoup(html, "html.parser")
     links = soup.select("a.match-header-link")
 
@@ -170,18 +191,25 @@ def getMatchTeams(html):
     return teams
 
 def parseTeam(teamDiv):
+    # Pulls one team's name/score/side-scores out of a vm-stats-game-header
+    # "div.team" block.
     scoreElement = teamDiv.select_one("div.score")
-    
+
     return {
         "name": teamDiv.select_one("div.team-name").get_text(strip=True),
         "score": int(scoreElement.get_text(strip=True)),
+        # VLR marks the winning team's score element with a "mod-win" class.
         "won": "mod-win" in scoreElement.get("class", []),
+        # "mod-t"/"mod-ct" are the rounds won on attack vs. defence.
         "attack": int(teamDiv.select_one("span.mod-t").get_text(strip=True)),
         "defence": int(teamDiv.select_one("span.mod-ct").get_text(strip=True)),
     }
-    
+
 if __name__ == "__main__":
-    
+
+    # Reuse the match IDs already collected for the veto dataset, so this run
+    # scrapes map results for the same set of matches (deduplicated + sorted
+    # for a stable, resumable order).
     with open("vetoData.csv") as f:
         ids = sorted({row["matchID"] for row in csv.DictReader(f)})
 
@@ -200,6 +228,8 @@ if __name__ == "__main__":
                 print(f"SKIP {matchID}: found {len(headerTeams)} header teams")
                 continue
 
+            # Stitch the match-level info (matchID, team IDs) onto each
+            # per-map row so every row in the final CSV is self-contained.
             for entry in maps:
                 entry["matchID"] = matchID
                 entry["teamID_a"] = headerTeams[0]["teamID"]
@@ -209,8 +239,11 @@ if __name__ == "__main__":
             print(matchID, len(maps))
 
         except Exception as e:
+            # Keep going on a bad/unexpected page rather than aborting the
+            # whole batch over one match.
             print(f"FAILED {matchID}: {type(e).__name__}: {e}")
 
+    # Write every map row collected across all matches to one CSV.
     with open("mapResults.csv", "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=[
             "matchID", "map", "pickedBy",
@@ -222,7 +255,11 @@ if __name__ == "__main__":
         writer.writerows(allRows)
 
     print(f"Wrote {len(allRows)} rows to mapResults.csv")
-    
+
+    # --- Superseded by the block above (kept for reference) ---
+    # Earlier version of the same run: wrote map rows without matchID/team
+    # IDs attached, before getMatchTeams() and the teamID_a/teamID_b and
+    # pickedBy fields were added.
     # with open("vetoData.csv") as f:
     #     ids = sorted({row["matchID"] for row in csv.DictReader(f)})
 
