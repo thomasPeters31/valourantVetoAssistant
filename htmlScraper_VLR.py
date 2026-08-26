@@ -205,87 +205,56 @@ def parseTeam(teamDiv):
         "defence": int(teamDiv.select_one("span.mod-ct").get_text(strip=True)),
     }
 
+def getMoreData():
+    # Load match IDs you've already scraped, so you don't refetch or duplicate them.
+        with open("mapResults.csv") as f:
+            existingIDs = {row["matchID"] for row in csv.DictReader(f)}
+    
+        print(f"Already have {len(existingIDs)} matches")
+    
+        # Pull IDs from pages 1-80. getMatchIDs re-fetches each results page fresh
+        # (useCache=False), but getHtml still caches individual match pages, so
+        # matches you've already scraped won't be re-downloaded below.
+        allIDs = getAllMatchIDs(80)
+        newIDs = [mid for mid in allIDs if mid not in existingIDs]
+    
+        print(f"Found {len(newIDs)} new matches to scrape")
+    
+        newRows = []
+    
+        for matchID in newIDs:
+            html = getHtml(f"https://www.vlr.gg/{matchID}", f"match_{matchID}")
+            try:
+                maps = getMapResults(html)
+                headerTeams = getMatchTeams(html)
+    
+                if len(headerTeams) != 2:
+                    print(f"SKIP {matchID}: found {len(headerTeams)} header teams")
+                    continue
+    
+                for entry in maps:
+                    entry["matchID"] = matchID
+                    entry["teamID_a"] = headerTeams[0]["teamID"]
+                    entry["teamID_b"] = headerTeams[1]["teamID"]
+                    newRows.append(entry)
+    
+                print(matchID, len(maps))
+            except Exception as e:
+                print(f"FAILED {matchID}: {type(e).__name__}: {e}")
+    
+        # Append rather than overwrite — "a" mode adds to the end of the file
+        # instead of truncating it like "w" does.
+        with open("mapResults.csv", "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=[
+                "matchID", "map", "pickedBy",
+                "teamID_a", "team_a", "score_a", "attack_a", "defence_a",
+                "teamID_b", "team_b", "score_b", "attack_b", "defence_b",
+                "winner",
+            ])
+            writer.writerows(newRows)   # no writeheader() — the header's already there
+    
+        print(f"Appended {len(newRows)} rows to mapResults.csv")
+
 if __name__ == "__main__":
-
-    # Reuse the match IDs already collected for the veto dataset, so this run
-    # scrapes map results for the same set of matches (deduplicated + sorted
-    # for a stable, resumable order).
-    with open("vetoData.csv") as f:
-        ids = sorted({row["matchID"] for row in csv.DictReader(f)})
-
-    allRows = []
-
-    for matchID in ids:
-        html = getHtml(f"https://www.vlr.gg/{matchID}", f"match_{matchID}")
-
-        try:
-            maps = getMapResults(html)
-            headerTeams = getMatchTeams(html)
-
-            # Need both teams to attach IDs; TBD placeholders and forfeits
-            # can leave the header incomplete.
-            if len(headerTeams) != 2:
-                print(f"SKIP {matchID}: found {len(headerTeams)} header teams")
-                continue
-
-            # Stitch the match-level info (matchID, team IDs) onto each
-            # per-map row so every row in the final CSV is self-contained.
-            for entry in maps:
-                entry["matchID"] = matchID
-                entry["teamID_a"] = headerTeams[0]["teamID"]
-                entry["teamID_b"] = headerTeams[1]["teamID"]
-                allRows.append(entry)
-
-            print(matchID, len(maps))
-
-        except Exception as e:
-            # Keep going on a bad/unexpected page rather than aborting the
-            # whole batch over one match.
-            print(f"FAILED {matchID}: {type(e).__name__}: {e}")
-
-    # Write every map row collected across all matches to one CSV.
-    with open("mapResults.csv", "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=[
-            "matchID", "map", "pickedBy",
-            "teamID_a", "team_a", "score_a", "attack_a", "defence_a",
-            "teamID_b", "team_b", "score_b", "attack_b", "defence_b",
-            "winner",
-        ])
-        writer.writeheader()
-        writer.writerows(allRows)
-
-    print(f"Wrote {len(allRows)} rows to mapResults.csv")
-
-    # --- Superseded by the block above (kept for reference) ---
-    # Earlier version of the same run: wrote map rows without matchID/team
-    # IDs attached, before getMatchTeams() and the teamID_a/teamID_b and
-    # pickedBy fields were added.
-    # with open("vetoData.csv") as f:
-    #     ids = sorted({row["matchID"] for row in csv.DictReader(f)})
-
-    # allRows = []
-
-    # for matchID in ids:
-    #     html = getHtml(f"https://www.vlr.gg/{matchID}", f"match_{matchID}")
-    #     try:
-    #         maps = getMapResults(html)
-
-    #         for entry in maps:
-    #             entry["matchID"] = matchID
-    #             allRows.append(entry)
-
-    #         print(matchID, len(maps))
-    #     except Exception as e:
-    #         print(f"FAILED {matchID}: {type(e).__name__}: {e}")
-
-    # with open("mapResults.csv", "w", newline="") as f:
-    #     writer = csv.DictWriter(f, fieldnames=[
-    #         "matchID", "map",
-    #         "team_a", "score_a", "attack_a", "defence_a",
-    #         "team_b", "score_b", "attack_b", "defence_b",
-    #         "winner",
-    #     ])
-    #     writer.writeheader()
-    #     writer.writerows(allRows)
-
-    # print(f"Wrote {len(allRows)} rows to mapResults.csv")
+    
+    getMoreData()
