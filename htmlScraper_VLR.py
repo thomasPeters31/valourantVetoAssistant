@@ -204,6 +204,14 @@ def parseTeam(teamDiv):
         "attack": int(teamDiv.select_one("span.mod-t").get_text(strip=True)),
         "defence": int(teamDiv.select_one("span.mod-ct").get_text(strip=True)),
     }
+def getMatchDate(html):
+    soup = BeautifulSoup(html, "html.parser")
+    dateElement = soup.select_one("div.moment-tz-convert")
+
+    if dateElement is None:
+        return None
+
+    return dateElement.get("data-utc-ts")
 
 def getMoreData():
     # Load match IDs you've already scraped, so you don't refetch or duplicate them.
@@ -227,6 +235,7 @@ def getMoreData():
             try:
                 maps = getMapResults(html)
                 headerTeams = getMatchTeams(html)
+                date = getMatchDate(html)
     
                 if len(headerTeams) != 2:
                     print(f"SKIP {matchID}: found {len(headerTeams)} header teams")
@@ -236,6 +245,7 @@ def getMoreData():
                     entry["matchID"] = matchID
                     entry["teamID_a"] = headerTeams[0]["teamID"]
                     entry["teamID_b"] = headerTeams[1]["teamID"]
+                    entry["date"] = date
                     newRows.append(entry)
     
                 print(matchID, len(maps))
@@ -249,12 +259,59 @@ def getMoreData():
                 "matchID", "map", "pickedBy",
                 "teamID_a", "team_a", "score_a", "attack_a", "defence_a",
                 "teamID_b", "team_b", "score_b", "attack_b", "defence_b",
-                "winner",
+                "winner", "date"
             ])
             writer.writerows(newRows)   # no writeheader() — the header's already there
     
         print(f"Appended {len(newRows)} rows to mapResults.csv")
+    
+def rebuildMapResults(numPages):
+    # Gather every match ID we've ever seen, plus whatever's on the results
+    # pages now. Since match pages are cached, re-parsing old ones costs no
+    # extra network requests — only genuinely new match pages get fetched.
+    with open("mapResults.csv") as f:
+        existingIDs = {row["matchID"] for row in csv.DictReader(f)}
+
+    freshIDs = set(getAllMatchIDs(numPages))
+    allIDs = sorted(existingIDs | freshIDs)
+
+    print(f"Rebuilding from {len(allIDs)} total matches")
+
+    allRows = []
+
+    for matchID in allIDs:
+        html = getHtml(f"https://www.vlr.gg/{matchID}", f"match_{matchID}")
+        try:
+            maps = getMapResults(html)
+            headerTeams = getMatchTeams(html)
+            date = getMatchDate(html)
+
+            if len(headerTeams) != 2:
+                print(f"SKIP {matchID}: found {len(headerTeams)} header teams")
+                continue
+
+            for entry in maps:
+                entry["matchID"] = matchID
+                entry["teamID_a"] = headerTeams[0]["teamID"]
+                entry["teamID_b"] = headerTeams[1]["teamID"]
+                entry["date"] = date
+                allRows.append(entry)
+
+        except Exception as e:
+            print(f"FAILED {matchID}: {type(e).__name__}: {e}")
+
+    with open("mapResults.csv", "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            "matchID", "map", "pickedBy", "date",
+            "teamID_a", "team_a", "score_a", "attack_a", "defence_a",
+            "teamID_b", "team_b", "score_b", "attack_b", "defence_b",
+            "winner",
+        ])
+        writer.writeheader()
+        writer.writerows(allRows)
+
+    print(f"Wrote {len(allRows)} rows to mapResults.csv")
+
 
 if __name__ == "__main__":
-    
-    getMoreData()
+    rebuildMapResults(160)
