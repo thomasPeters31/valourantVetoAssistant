@@ -212,10 +212,10 @@ def getMoreData():
     
         print(f"Already have {len(existingIDs)} matches")
     
-        # Pull IDs from pages 1-80. getMatchIDs re-fetches each results page fresh
+        # Pull IDs from pages 1-160. getMatchIDs re-fetches each results page fresh
         # (useCache=False), but getHtml still caches individual match pages, so
         # matches you've already scraped won't be re-downloaded below.
-        allIDs = getAllMatchIDs(80)
+        allIDs = getAllMatchIDs(160)
         newIDs = [mid for mid in allIDs if mid not in existingIDs]
     
         print(f"Found {len(newIDs)} new matches to scrape")

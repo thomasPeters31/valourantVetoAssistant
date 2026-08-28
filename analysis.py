@@ -53,36 +53,65 @@ def pickWinRate():
      print(f"Team A wins overall: {teamAWins}/{len(rows)} = {teamAWins / (len(rows)) * 100:.1f}%")
 
 def buildFrequencyTable(rows):
-     # Tally, per (team, map) pair, how many times that team played that
-     # map and how many times they won it — a building block for later
-     # per-team-per-map win-rate stats.
      played = defaultdict(int)
      wins = defaultdict(int)
+     teamPlayed = defaultdict(int)
+     teamWins = defaultdict(int)
 
      for row in rows:
           mapName = row["map"]
+          teamA = row["teamID_a"]
+          teamB = row["teamID_b"]
           winner = row["winner"]
-          teamA = row["team_a"]
-          teamB = row["team_b"]
 
-          # Both teams in the match played this map, regardless of winner.
           played[(teamA, mapName)] += 1
           played[(teamB, mapName)] += 1
+          teamPlayed[teamA] += 1
+          teamPlayed[teamB] += 1
 
           if winner == row["team_a"]:
                wins[(teamA, mapName)] += 1
+               teamWins[teamA] += 1
           else:
                wins[(teamB, mapName)] += 1
+               teamWins[teamB] += 1
 
-     # How many (team, map) pairs occur exactly once, twice, etc. — a quick
-     # sanity check on sample size (e.g. "most teams have only played most
-     # maps a handful of times") before trusting any per-team win rate.
-     gameCounter = Counter(played.values())
-     print(sorted(gameCounter.items()))
+     return played, wins, teamPlayed, teamWins
+
+def predictWinRate(teamID, mapName, played, wins, teamPlayed, teamWins, threshold=10, minTeamGames=5):
+    key = (teamID, mapName)
+
+    if played[key] >= threshold:
+        return wins[key] / played[key]
+
+    if teamPlayed[teamID] >= minTeamGames:
+        return teamWins[teamID] / teamPlayed[teamID]
+
+    return 0.5
 
 if __name__ == "__main__":
      with open('mapResults.csv', 'r') as file:
           rows = list(csv.DictReader(file))
 
-     pickWinRate()
-     buildFrequencyTable(rows)
+     played, wins, teamPlayed, teamWins = buildFrequencyTable(rows)
+
+     # Test the fallback chain with a real team pulled from the data,
+     # rather than a hand-typed ID that might not exist.
+     sampleRow = rows[0]
+     testTeam = sampleRow["teamID_a"]
+     testMap = sampleRow["map"]
+
+     print(f"\nTesting team {testTeam} on {testMap}")
+     print(f"  games on this map: {played[(testTeam, testMap)]}")
+     print(f"  games overall: {teamPlayed[testTeam]}")
+     print(f"  predicted win rate: {predictWinRate(testTeam, testMap, played, wins, teamPlayed, teamWins)}")
+
+     # A team with almost no data, to confirm the fallback actually drops levels.
+     sparseTeam = min(teamPlayed, key=teamPlayed.get)
+     sparseMap = testMap
+
+     print(f"\nTesting sparse team {sparseTeam} on {sparseMap}")
+     print(f"  games on this map: {played[(sparseTeam, sparseMap)]}")
+     print(f"  games overall: {teamPlayed[sparseTeam]}")
+     print(f"  predicted win rate: {predictWinRate(sparseTeam, sparseMap, played, wins, teamPlayed, teamWins)}")
+     
