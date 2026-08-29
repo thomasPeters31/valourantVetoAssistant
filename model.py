@@ -15,6 +15,13 @@ def computeLoss(y, preds):
     preds = np.clip(preds, epsilon, 1 - epsilon)
     return -np.mean(y * np.log(preds) + (1 - y) * np.log(1 - preds))
 
+def computeGradients(X, Y, preds):
+    n = len(Y)
+    error = preds - Y
+    gradWeights = X.T @ error / n
+    gradBias = np.mean(error)
+    return gradWeights, gradBias
+
 if __name__ == "__main__":
     with open("mapResults.csv") as f:
         rows = list(csv.DictReader(f))
@@ -27,4 +34,7 @@ if __name__ == "__main__":
 
     preds = predict(X, weights, bias)
     loss = computeLoss(y, preds)
-    print(loss)
+    
+    gradWeights, gradBias = computeGradients(X, y, preds)
+    print(gradWeights)
+    print(gradBias)
