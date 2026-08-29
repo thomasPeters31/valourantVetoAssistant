@@ -22,19 +22,41 @@ def computeGradients(X, Y, preds):
     gradBias = np.mean(error)
     return gradWeights, gradBias
 
+def train(X, Y, learningRate=0.1, epochs=5000):
+    weights = np.zeros(X.shape[1])
+    bias = 0.0
+    
+    for epoch in range(epochs):
+        preds = predict(X, weights, bias)
+        loss = computeLoss(Y, preds)
+        gradWeights, gradBias = computeGradients(X, Y, preds)
+        
+        weights -= learningRate * gradWeights
+        bias -= learningRate * gradBias
+        
+        if epoch % 100 == 0:
+            print(f"Epoch {epoch}: loss = {loss: .4f}")
+    
+    return weights, bias
+
 if __name__ == "__main__":
     with open("mapResults.csv") as f:
         rows = list(csv.DictReader(f))
 
-    played, wins, teamPlayed, teamWins = buildFrequencyTable(rows)
-    X, y = buildDataset(rows, played, wins, teamPlayed, teamWins)
+    rows.sort(key=lambda r: r["date"])
+    splitPoint = int(len(rows) * 0.8)
+    trainRows = rows[:splitPoint]
+    testRows = rows[splitPoint:]
 
-    weights = np.zeros(4)
-    bias = 0.0
+    played, wins, teamPlayed, teamWins = buildFrequencyTable(trainRows)
 
-    preds = predict(X, weights, bias)
-    loss = computeLoss(y, preds)
-    
-    gradWeights, gradBias = computeGradients(X, y, preds)
-    print(gradWeights)
-    print(gradBias)
+    XTrain, yTrain = buildDataset(trainRows, played, wins, teamPlayed, teamWins)
+    XTest, yTest = buildDataset(testRows, played, wins, teamPlayed, teamWins)
+
+    weights, bias = train(XTrain, yTrain, epochs=5000)
+
+    testPreds = predict(XTest, weights, bias)
+    predictedLabels = (testPreds >= 0.5).astype(int)
+
+    accuracy = np.mean(predictedLabels == yTest)
+    print(f"Test accuracy: {accuracy * 100:.1f}%")

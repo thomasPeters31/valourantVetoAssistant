@@ -113,7 +113,7 @@ def baseLineEvaluation():
      # 80/20 chronological split: predict "future" matches using only stats
      # that would have been known at the time (never mixes test data into
      # the training stats).
-     spiltPoint = int(len(rows) * 0.8)
+     spiltPoint = int(len(rows) * 0.75)
      trainRows = rows[:spiltPoint]
      testRows = rows[spiltPoint:]
 
