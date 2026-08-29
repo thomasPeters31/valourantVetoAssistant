@@ -89,29 +89,55 @@ def predictWinRate(teamID, mapName, played, wins, teamPlayed, teamWins, threshol
 
     return 0.5
 
+def baseLineEvaluation():
+     with open('mapResults.csv', 'r') as f:
+          rows = list(csv.DictReader(f))
+     
+     rows.sort(key=lambda r: r["date"])  # Sort by date to simulate real-time prediction
+     
+     spiltPoint = int(len(rows) * 0.8)
+     trainRows = rows[:spiltPoint]
+     testRows = rows[spiltPoint:]
+     
+     print(f"Training on {len(trainRows)} rows, testing on {len(testRows)} rows")
+     
+     played, wins, teamPlayed, teamWins = buildFrequencyTable(trainRows)
+     
+     correctPredictions = 0
+     totalPredictions = 0
+     ties = 0
+     
+     for row in testRows:
+          teamA = row["teamID_a"]
+          teamB = row["teamID_b"]
+          teamAName = row["team_a"]
+          teamBName = row["team_b"]
+          mapName = row["map"]
+          winner = row["winner"]
+          
+          winRateA = predictWinRate(teamA, mapName, played, wins, teamPlayed, teamWins)
+          winRateB = predictWinRate(teamB, mapName, played, wins, teamPlayed, teamWins)
+          
+          if winRateA == winRateB:
+               ties += 1
+
+          if winRateA > winRateB:
+               predictedWinner = teamAName
+          elif winRateB > winRateA:
+               predictedWinner = teamBName
+          else:
+               predictedWinner = teamAName
+          
+          if predictedWinner == winner:
+               correctPredictions += 1    
+          
+          totalPredictions += 1
+          
+          
+          
+     print(f"Baseline accuracy: {correctPredictions}/{totalPredictions} = {correctPredictions / totalPredictions * 100:.1f}%")
+     print(f"Number of ties: {ties}/{totalPredictions} = {ties / totalPredictions * 100:.1f}%")
+
 if __name__ == "__main__":
-     with open('mapResults.csv', 'r') as file:
-          rows = list(csv.DictReader(file))
-
-     played, wins, teamPlayed, teamWins = buildFrequencyTable(rows)
-
-     # Test the fallback chain with a real team pulled from the data,
-     # rather than a hand-typed ID that might not exist.
-     sampleRow = rows[0]
-     testTeam = sampleRow["teamID_a"]
-     testMap = sampleRow["map"]
-
-     print(f"\nTesting team {testTeam} on {testMap}")
-     print(f"  games on this map: {played[(testTeam, testMap)]}")
-     print(f"  games overall: {teamPlayed[testTeam]}")
-     print(f"  predicted win rate: {predictWinRate(testTeam, testMap, played, wins, teamPlayed, teamWins)}")
-
-     # A team with almost no data, to confirm the fallback actually drops levels.
-     sparseTeam = min(teamPlayed, key=teamPlayed.get)
-     sparseMap = testMap
-
-     print(f"\nTesting sparse team {sparseTeam} on {sparseMap}")
-     print(f"  games on this map: {played[(sparseTeam, sparseMap)]}")
-     print(f"  games overall: {teamPlayed[sparseTeam]}")
-     print(f"  predicted win rate: {predictWinRate(sparseTeam, sparseMap, played, wins, teamPlayed, teamWins)}")
+    baseLineEvaluation()
      
