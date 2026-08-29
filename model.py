@@ -10,6 +10,11 @@ def predict(X, weights, bias):
     z = X @ weights + bias
     return sigmoid(z)
 
+def computeLoss(y, preds):
+    epsilon = 1e-15
+    preds = np.clip(preds, epsilon, 1 - epsilon)
+    return -np.mean(y * np.log(preds) + (1 - y) * np.log(1 - preds))
+
 if __name__ == "__main__":
     with open("mapResults.csv") as f:
         rows = list(csv.DictReader(f))
@@ -20,5 +25,6 @@ if __name__ == "__main__":
     weights = np.zeros(4)
     bias = 0.0
 
-    preds = predict(X[:5], weights, bias)
-    print(preds)
+    preds = predict(X, weights, bias)
+    loss = computeLoss(y, preds)
+    print(loss)
