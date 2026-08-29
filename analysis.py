@@ -139,5 +139,5 @@ def baseLineEvaluation():
      print(f"Number of ties: {ties}/{totalPredictions} = {ties / totalPredictions * 100:.1f}%")
 
 if __name__ == "__main__":
-    baseLineEvaluation()
+    pickWinRate()
      
