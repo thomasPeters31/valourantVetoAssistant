@@ -44,7 +44,7 @@ if __name__ == "__main__":
         rows = list(csv.DictReader(f))
 
     rows.sort(key=lambda r: r["date"])
-    splitPoint = int(len(rows) * 0.8)
+    splitPoint = int(len(rows) * 0.9)
     trainRows = rows[:splitPoint]
     testRows = rows[splitPoint:]
 

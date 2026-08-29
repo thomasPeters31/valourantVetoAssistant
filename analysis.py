@@ -1,3 +1,17 @@
+# --- Where this fits ---
+# Second stage of the pipeline, after htmlScraper_VLR.py has written
+# mapResults.csv:
+#   htmlScraper_VLR.py -> scrapes VLR.gg, writes mapResults.csv
+#   analysis.py         -> (this file) reads mapResults.csv for descriptive
+#                          stats, and provides buildFrequencyTable()/
+#                          predictWinRate(), which features.py also imports
+#                          to build its ML dataset
+#   features.py         -> turns mapResults.csv + this file's helpers into
+#                          a numpy feature/label dataset
+#
+# Run this file directly for an interactive menu (see __main__ at the
+# bottom) to pick which analysis to print.
+
 import csv
 from collections import defaultdict
 from collections import Counter

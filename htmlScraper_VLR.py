@@ -1,3 +1,16 @@
+# --- Where this fits ---
+# This is the data-collection stage of the pipeline:
+#   htmlScraper_VLR.py  -> scrapes VLR.gg and writes mapResults.csv (this file)
+#   analysis.py          -> reads mapResults.csv, computes win-rate stats,
+#                            and exposes buildFrequencyTable()/predictWinRate()
+#   features.py           -> reads mapResults.csv + analysis.py's helpers to
+#                            build a numpy feature/label dataset for modeling
+#
+# Run this file directly (`python htmlScraper_VLR.py`) to (re)build
+# mapResults.csv from scratch — see rebuildMapResults() at the bottom.
+# Every match page fetched is cached under cache/<name>.html, so re-running
+# only makes network requests for matches that aren't cached yet.
+
 import requests
 import os
 from bs4 import BeautifulSoup
@@ -56,7 +69,8 @@ def getVetoSequence(html):
 
 def getHtml(url, cacheName, useCache=True):
     # Fetches a page's HTML, caching it on disk under cacheName so repeated
-    # runs don't re-request pages we've already scraped.
+    # runs don't re-request pages we've already scraped. Every other
+    # function in this file that hits the network goes through here.
     os.makedirs("cache", exist_ok=True)
     path = f"cache/{cacheName}.html"
 
@@ -109,7 +123,8 @@ def getMatchIDs(pageNumber):
 
 def getAllMatchIDs(numPages):
     # Walks the results listing page by page (1-indexed) and flattens every
-    # match ID found into one list.
+    # match ID found into one list. Used by both getMoreData() and
+    # rebuildMapResults() to discover which matches exist on VLR right now.
     allIDs = []
     for page in range(1, numPages + 1):
         ids = getMatchIDs(page)
@@ -205,6 +220,9 @@ def parseTeam(teamDiv):
         "defence": int(teamDiv.select_one("span.mod-ct").get_text(strip=True)),
     }
 def getMatchDate(html):
+    # Reads the match's UTC timestamp from its header, used by analysis.py's
+    # baseLineEvaluation() to sort matches chronologically for a time-based
+    # train/test split.
     soup = BeautifulSoup(html, "html.parser")
     dateElement = soup.select_one("div.moment-tz-convert")
 
@@ -214,44 +232,51 @@ def getMatchDate(html):
     return dateElement.get("data-utc-ts")
 
 def getMoreData():
+    # Incremental alternative to rebuildMapResults(): only fetches and
+    # appends matches not already present in mapResults.csv, instead of
+    # re-parsing every cached match page from scratch. Not currently called
+    # from __main__ (rebuildMapResults() is used there instead) — kept
+    # around as a faster option for topping up the dataset between full
+    # rebuilds.
+
     # Load match IDs you've already scraped, so you don't refetch or duplicate them.
         with open("mapResults.csv") as f:
             existingIDs = {row["matchID"] for row in csv.DictReader(f)}
-    
+
         print(f"Already have {len(existingIDs)} matches")
-    
+
         # Pull IDs from pages 1-160. getMatchIDs re-fetches each results page fresh
         # (useCache=False), but getHtml still caches individual match pages, so
         # matches you've already scraped won't be re-downloaded below.
         allIDs = getAllMatchIDs(160)
         newIDs = [mid for mid in allIDs if mid not in existingIDs]
-    
+
         print(f"Found {len(newIDs)} new matches to scrape")
-    
+
         newRows = []
-    
+
         for matchID in newIDs:
             html = getHtml(f"https://www.vlr.gg/{matchID}", f"match_{matchID}")
             try:
                 maps = getMapResults(html)
                 headerTeams = getMatchTeams(html)
                 date = getMatchDate(html)
-    
+
                 if len(headerTeams) != 2:
                     print(f"SKIP {matchID}: found {len(headerTeams)} header teams")
                     continue
-    
+
                 for entry in maps:
                     entry["matchID"] = matchID
                     entry["teamID_a"] = headerTeams[0]["teamID"]
                     entry["teamID_b"] = headerTeams[1]["teamID"]
                     entry["date"] = date
                     newRows.append(entry)
-    
+
                 print(matchID, len(maps))
             except Exception as e:
                 print(f"FAILED {matchID}: {type(e).__name__}: {e}")
-    
+
         # Append rather than overwrite — "a" mode adds to the end of the file
         # instead of truncating it like "w" does.
         with open("mapResults.csv", "a", newline="") as f:
@@ -262,13 +287,15 @@ def getMoreData():
                 "winner", "date"
             ])
             writer.writerows(newRows)   # no writeheader() — the header's already there
-    
+
         print(f"Appended {len(newRows)} rows to mapResults.csv")
-    
+
 def rebuildMapResults(numPages):
     # Gather every match ID we've ever seen, plus whatever's on the results
     # pages now. Since match pages are cached, re-parsing old ones costs no
     # extra network requests — only genuinely new match pages get fetched.
+    # This is the function __main__ calls, and it fully overwrites
+    # mapResults.csv (unlike getMoreData(), which only appends).
     with open("mapResults.csv") as f:
         existingIDs = {row["matchID"] for row in csv.DictReader(f)}
 
@@ -290,6 +317,9 @@ def rebuildMapResults(numPages):
                 print(f"SKIP {matchID}: found {len(headerTeams)} header teams")
                 continue
 
+            # Stitch match-level info (ID, both team IDs, date) onto every
+            # per-map row so each output row is self-contained — this is
+            # the shape analysis.py and features.py both expect to read.
             for entry in maps:
                 entry["matchID"] = matchID
                 entry["teamID_a"] = headerTeams[0]["teamID"]
@@ -298,6 +328,8 @@ def rebuildMapResults(numPages):
                 allRows.append(entry)
 
         except Exception as e:
+            # Keep going on a bad/unexpected page rather than aborting the
+            # whole rebuild over one match.
             print(f"FAILED {matchID}: {type(e).__name__}: {e}")
 
     with open("mapResults.csv", "w", newline="") as f:
@@ -314,4 +346,7 @@ def rebuildMapResults(numPages):
 
 
 if __name__ == "__main__":
+    # Rebuilds mapResults.csv from the first 160 pages of VLR's results
+    # listing (~4000 matches at 25/page) plus any match IDs already on
+    # disk. This is the file analysis.py and features.py both read.
     rebuildMapResults(160)

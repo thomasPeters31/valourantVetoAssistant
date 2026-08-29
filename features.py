@@ -1,3 +1,16 @@
+# --- Where this fits ---
+# Final stage of the pipeline:
+#   htmlScraper_VLR.py -> scrapes VLR.gg, writes mapResults.csv
+#   analysis.py         -> reads mapResults.csv; this file imports its
+#                          buildFrequencyTable() (win/played counts per
+#                          team+map) and predictWinRate() (the fallback
+#                          win-rate estimator built on top of those counts)
+#   features.py         -> (this file) turns each mapResults.csv row into a
+#                          numeric feature vector + win/loss label, ready
+#                          for a model (X, Y arrays below)
+#
+# Run this file directly to build the full dataset and print its shape.
+
 import csv
 from analysis import buildFrequencyTable, predictWinRate
 import numpy as np
