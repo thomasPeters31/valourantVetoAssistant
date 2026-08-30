@@ -61,8 +61,8 @@ def train(X, Y, learningRate=0.1, epochs=5000):
         weights -= learningRate * gradWeights
         bias -= learningRate * gradBias
 
-        if epoch % 100 == 0:
-            print(f"Epoch {epoch}: loss = {loss: .4f}")
+        # if epoch % 100 == 0:
+        #     print(f"Epoch {epoch}: loss = {loss: .4f}")
 
     return weights, bias
 
@@ -101,7 +101,7 @@ if __name__ == "__main__":
     accuracy = np.mean(predictedLabels == yTest)
     print(f"Test accuracy: {accuracy * 100:.1f}%")
     
-    row = testRows[0]
-    teamA = row["teamID_a"]
-    print(f"This match's actual attack_a: {row['attack_a']}, defence_a: {row['defence_a']}")
-    print(f"Team's historical attack rate: {safeRate(attackWon[teamA], attackPlayed[teamA]):.3f}")  
+    trainPreds = predict(XTrain, weights, bias)
+    trainPredictedLabels = (trainPreds >= 0.5).astype(int)
+    trainAccuracy = np.mean(trainPredictedLabels == yTrain)
+    print(f"Train accuracy: {trainAccuracy * 100:.1f}%")    

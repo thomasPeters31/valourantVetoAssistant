@@ -156,3 +156,35 @@ this dataset. Moving beyond it likely needs either a non-linear model
 capable of interactions the logistic regression can't represent (v2), or
 denser per-team-map data (a known limitation, see above), rather than more
 features of the same kind.
+
+## v1.2: attack/defence round rates
+
+Added each team's historical attack-side and defence-side round win rate
+(computed from round counts already in `mapResults.csv`, tracked via the
+same fallback-style frequency table as the map win rate).
+
+| Model | Test accuracy |
+|---|---|
+| v1 (4 features) | 55.1-56.6% (stable across splits) |
+| v1.1 (+ pick, map identity) | 55.5% (no improvement) |
+| v1.2 (+ attack/defence rates) | **68.2-68.6%** (stable across splits) |
+
+This is a substantial jump, and was verified rather than taken at face
+value: the round-counting logic was checked against an independent
+from-scratch reimplementation (exact match), leakage was ruled out by
+confirming a team's historical rate is built entirely from other matches
+(not the match being predicted), the result held stable across three
+different train/test splits, and training accuracy matched test accuracy
+(68.5% vs 68.2-68.6%), ruling out overfitting.
+
+**Why loss barely moved while accuracy jumped ~13 points:** loss is a
+smooth measure sensitive to confidence on every prediction; accuracy is a
+hard 0.5 threshold. The trained weights show attack/defence features
+contribute moderately (roughly a fifth the weight of the map win-rate
+features) rather than dominating — consistent with a large number of
+borderline predictions being tipped across the 0.5 line without much
+change to the model's overall confidence calibration.
+
+**Conclusion:** round-level performance data carries meaningfully more
+signal than map win/loss alone. A map result compresses 13-20 rounds into a
+single win/loss bit; feeding round outcomes in more directly recovers
