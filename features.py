@@ -23,8 +23,29 @@ def canonicalOrder(teamA, teamB):
         return teamA, teamB
     else:
         return teamB, teamA
+    
+def pickedCanonicalTeam1(pickedBy, rawA, rawB):
+    if pickedBy == "":
+        return 0
+    
+    swapped = rawA >= rawB
+    
+    if not swapped:
+        return 1 if pickedBy == "a" else -1
+    else:
+        return 1 if pickedBy == "b" else -1
 
-def buildFeatures(row, played, wins, teamPlayed, teamWins):
+def buildMapVocab(rows):
+    maps = sorted(set(row["map"] for row in rows))
+    return {mapName: i for i, mapName in enumerate(maps)}
+
+def oneHotMap(mapName, mapVocab):
+    vector = [0] * len(mapVocab)
+    if mapName in mapVocab:
+        vector[mapVocab[mapName]] = 1
+    return vector
+
+def buildFeatures(row, played, wins, teamPlayed, teamWins, mapVocab):
     # Turns one mapResults.csv row into a (features, label) pair for a
     # win-probability model: features describe both teams' map strength,
     # label says whether the canonical "team1" was the winner.
@@ -40,23 +61,26 @@ def buildFeatures(row, played, wins, teamPlayed, teamWins):
     # Each team's win rate across all maps, as a map-agnostic skill signal.
     overallRate1 = teamWins[team1] / teamPlayed[team1] if teamPlayed[team1] > 0 else 0.5
     overallRate2 = teamWins[team2] / teamPlayed[team2] if teamPlayed[team2] > 0 else 0.5
+    
+    pickedFeture = pickedCanonicalTeam1(row["pickedBy"], rawA, rawB)
+    mapFetures = oneHotMap(mapName, mapVocab)
 
     # row["winner"] holds the winning team's *name*, so compare it against
     # the name fields (team_a/team_b) to resolve the winner's *ID*.
     winnerID = row["teamID_a"] if row["winner"] == row["team_a"] else row["teamID_b"]
     label = 1 if winnerID == team1 else 0
 
-    features = [rate1, rate2, overallRate1, overallRate2]
+    features = [rate1, rate2, overallRate1, overallRate2, pickedFeture] + mapFetures
     return features, label
 
-def buildDataset(rows, played, wins, teamPlayed, teamWins):
+def buildDataset(rows, played, wins, teamPlayed, teamWins, mapVocab):
     # Runs buildFeatures() over every row to assemble the full training
     # matrix (x) and label vector (y) for a model.
     x = []
     y = []
 
     for row in rows:
-        features, label = buildFeatures(row, played, wins, teamPlayed, teamWins)
+        features, label = buildFeatures(row, played, wins, teamPlayed, teamWins, mapVocab)
         x.append(features)
         y.append(label)
 

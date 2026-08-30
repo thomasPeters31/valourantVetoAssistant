@@ -17,7 +17,7 @@
 import numpy as np
 import csv
 from analysis import buildFrequencyTable
-from features import buildDataset
+from features import buildDataset, buildMapVocab
 
 def sigmoid(z):
     # Squashes any real-valued score into a (0, 1) probability.
@@ -74,7 +74,7 @@ if __name__ == "__main__":
     # train on older matches, test on newer ones, so the model is never
     # evaluated on data from before its "training cutoff".
     rows.sort(key=lambda r: r["date"])
-    splitPoint = int(len(rows) * 0.9)
+    splitPoint = int(len(rows) * 0.8)
     trainRows = rows[:splitPoint]
     testRows = rows[splitPoint:]
 
@@ -82,9 +82,10 @@ if __name__ == "__main__":
     # features for both splits — the test set's features still only reflect
     # what was knowable at training time, avoiding leakage.
     played, wins, teamPlayed, teamWins = buildFrequencyTable(trainRows)
+    mapVocab = buildMapVocab(trainRows)
 
-    XTrain, yTrain = buildDataset(trainRows, played, wins, teamPlayed, teamWins)
-    XTest, yTest = buildDataset(testRows, played, wins, teamPlayed, teamWins)
+    XTrain, yTrain = buildDataset(trainRows, played, wins, teamPlayed, teamWins, mapVocab)
+    XTest, yTest = buildDataset(testRows, played, wins, teamPlayed, teamWins, mapVocab)
 
     weights, bias = train(XTrain, yTrain, epochs=5000)
 
@@ -93,5 +94,8 @@ if __name__ == "__main__":
     testPreds = predict(XTest, weights, bias)
     predictedLabels = (testPreds >= 0.5).astype(int)
 
+    print(XTrain.shape)
+    print(len(mapVocab), mapVocab)
+    
     accuracy = np.mean(predictedLabels == yTest)
     print(f"Test accuracy: {accuracy * 100:.1f}%")
