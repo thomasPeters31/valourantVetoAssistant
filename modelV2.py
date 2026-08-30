@@ -4,6 +4,7 @@ import csv
 from analysis import buildFrequencyTable
 from features import buildDataset, buildMapVocab
 
+
 class VetoModel(nn.Module):
     def __init__(self, numFeatures):
         super().__init__()
@@ -18,9 +19,7 @@ class VetoModel(nn.Module):
         return torch.sigmoid(x)
 
 
-if __name__ == "__main__":
-    print(torch.__version__)
-
+def loadData():
     with open("mapResults.csv") as f:
         rows = list(csv.DictReader(f))
 
@@ -38,6 +37,10 @@ if __name__ == "__main__":
     XTest, yTest = buildDataset(testRows, played, wins, teamPlayed, teamWins,
                                  attackWon, attackPlayed, defenceWon, defencePlayed, mapVocab)
 
+    return XTrain, yTrain, XTest, yTest
+
+
+def trainAndEvaluate(XTrain, yTrain, XTest, yTest, epochs=5000, lr=0.1):
     XTrainTensor = torch.tensor(XTrain, dtype=torch.float32)
     yTrainTensor = torch.tensor(yTrain, dtype=torch.float32)
     XTestTensor = torch.tensor(XTest, dtype=torch.float32)
@@ -46,5 +49,35 @@ if __name__ == "__main__":
     model = VetoModel(numFeatures=XTrain.shape[1])
     print(model)
 
-    testOutput = model(XTrainTensor[:5])
-    print(testOutput)
+    lossFunction = nn.BCELoss()
+    optimizer = torch.optim.SGD(model.parameters(), lr=lr)
+
+    for epoch in range(epochs):
+        optimizer.zero_grad()
+
+        predictions = model(XTrainTensor).squeeze()
+        loss = lossFunction(predictions, yTrainTensor)
+
+        loss.backward()
+        optimizer.step()
+
+        if epoch % 100 == 0:
+            print(f"Epoch {epoch}: loss = {loss.item():.4f}")
+
+    with torch.no_grad():
+        testPredictions = model(XTestTensor).squeeze()
+        testLoss = lossFunction(testPredictions, yTestTensor)
+        predictedLabels = (testPredictions >= 0.5).float()
+        accuracy = (predictedLabels == yTestTensor).float().mean()
+
+    print(f"Final test loss: {testLoss.item():.4f}")
+    print(f"Test accuracy: {accuracy.item() * 100:.1f}%")
+
+    return model, accuracy.item()
+
+
+if __name__ == "__main__":
+    print(torch.__version__)
+
+    XTrain, yTrain, XTest, yTest = loadData()
+    model, accuracy = trainAndEvaluate(XTrain, yTrain, XTest, yTest)
