@@ -75,6 +75,10 @@ def buildFrequencyTable(rows):
      wins = defaultdict(int)       # (teamID, map) -> times that team won that map
      teamPlayed = defaultdict(int) # teamID -> maps played overall
      teamWins = defaultdict(int)   # teamID -> maps won overall
+     attackRoundsWon = defaultdict(int)
+     attackRoundsPlayed = defaultdict(int)
+     defenceRoundsWon = defaultdict(int)
+     defenceRoundsPlayed = defaultdict(int)
 
      for row in rows:
           mapName = row["map"]
@@ -96,8 +100,43 @@ def buildFrequencyTable(rows):
           else:
                wins[(teamB, mapName)] += 1
                teamWins[teamB] += 1
+               
+           # Rounds are symmetric: team A's attack rounds are played against
+          # team B's defence, and vice versa — but each team's own attack/defence
+          # tally is just their own scored rounds on that side.
+          attackRoundsWon[teamA] += int(row["attack_a"])
+          attackRoundsPlayed[teamA] += int(row["attack_a"]) + int(row["defence_b"])
+          defenceRoundsWon[teamA] += int(row["defence_a"])
+          defenceRoundsPlayed[teamA] += int(row["defence_a"]) + int(row["attack_b"])
 
-     return played, wins, teamPlayed, teamWins
+          attackRoundsWon[teamB] += int(row["attack_b"])
+          attackRoundsPlayed[teamB] += int(row["attack_b"]) + int(row["defence_a"])
+          defenceRoundsWon[teamB] += int(row["defence_b"])
+          defenceRoundsPlayed[teamB] += int(row["defence_b"]) + int(row["attack_a"])
+
+     return (played, wins, teamPlayed, teamWins,
+            attackRoundsWon, attackRoundsPlayed,
+            defenceRoundsWon, defenceRoundsPlayed)
+     
+def safeRate(won, played, default=0.5):
+    return won / played if played > 0 else default
+
+def verifyTeam(teamID, rows):
+    attackWon = attackPlayed = defenceWon = defencePlayed = 0
+
+    for row in rows:
+        if row["teamID_a"] == teamID:
+            attackWon += int(row["attack_a"])
+            attackPlayed += int(row["attack_a"]) + int(row["defence_b"])
+            defenceWon += int(row["defence_a"])
+            defencePlayed += int(row["defence_a"]) + int(row["attack_b"])
+        elif row["teamID_b"] == teamID:
+            attackWon += int(row["attack_b"])
+            attackPlayed += int(row["attack_b"]) + int(row["defence_a"])
+            defenceWon += int(row["defence_b"])
+            defencePlayed += int(row["defence_b"]) + int(row["attack_a"])
+
+    return attackWon, attackPlayed, defenceWon, defencePlayed
 
 def predictWinRate(teamID, mapName, played, wins, teamPlayed, teamWins, threshold=10, minTeamGames=5):
     # Estimates how often a team wins on a given map, falling back to a
@@ -176,23 +215,15 @@ def baseLineEvaluation():
      print(f"Number of ties: {ties}/{totalPredictions} = {ties / totalPredictions * 100:.1f}%")
 
 if __name__ == "__main__":
-    print("1. Pick win rate")
-    print("2. Build frequency table")
-    print("3. Predicted win rate (baseline evaluation)")
-    choice = input("Choose an option: ").strip()
+     with open("mapResults.csv") as f:
+        rows = list(csv.DictReader(f))
+     
+     
+     
+     (played, wins, teamPlayed, teamWins,
+     attackWon, attackPlayed, defenceWon, defencePlayed) = buildFrequencyTable(rows)
 
-    if choice == "1":
-        pickWinRate()
-    elif choice == "2":
-        with open('mapResults.csv', 'r') as f:
-            rows = list(csv.DictReader(f))
-        played, wins, teamPlayed, teamWins = buildFrequencyTable(rows)
-        # buildFrequencyTable() itself only returns lookup tables (also used
-        # by baseLineEvaluation), so summarize them here for direct viewing.
-        gameCounter = Counter(played.values())
-        print("Play-count distribution across (team, map) pairs:")
-        print(sorted(gameCounter.items()))
-    elif choice == "3":
-        baseLineEvaluation()
-    else:
-        print(f"Unknown option: {choice}")
+     testTeam = rows[0]["teamID_a"]
+     print(verifyTeam(testTeam, rows))
+     print(f"Attack: {attackWon[testTeam]}/{attackPlayed[testTeam]}")
+     print(f"Defence: {defenceWon[testTeam]}/{defencePlayed[testTeam]}")

@@ -118,10 +118,41 @@ four features capture most of the extractable signal available from win-
 rate history alone — moving beyond ~55% will need genuinely new
 information, not more training or model complexity on the same inputs.
 
-**What v1.1 will add**, in order of expected impact:
-- Which team picked the map (measured separately at ~52% picker win rate,
-  not yet in the feature vector)
-- Map identity itself (the model currently has no signal for *which* map
-  is being played)
-- Denser data per team-map pair, most likely by scraping full seasons of
-  specific leagues rather than sweeping every region and tier
+## v1.1: pick and map-identity features
+
+Tested whether adding two more features would improve on the v1 model:
+
+- **Pick information** — whether the canonical "team1" picked this map
+  (encoded as +1/-1/0 for team1-picked/team2-picked/decider)
+- **Map identity** — a one-hot vector across the 12 maps seen in training
+  data, so the model can learn map-specific baseline tendencies
+
+Both were built correctly and confirmed to reach the model (feature vector
+grew from 4 to 17 columns; map vocabulary built from training data only, to
+avoid leaking test-period maps).
+
+| Model | 80/20 split accuracy |
+|---|---|
+| v1 (4 features) | 55.4% |
+| v1.1 (17 features) | 55.5% |
+
+**Result: no meaningful improvement.** The 0.1pp difference is within noise
+(the v1 model alone showed a 55.1-56.6% spread across different train/test
+splits). Two features grounded in real, separately-measured effects didn't
+move the model.
+
+**Why this is a useful negative result, not a failure:**
+- Map identity may be largely redundant with the existing map-specific win
+  rate features (`rate1`/`rate2`), which already encode "how does this team
+  do on this specific map" — a separate "this is Ascent" flag adds little
+  once that's already present.
+- The picker's edge is small (~2 percentage points, per the pick-rate
+  finding above) and may be too weak a signal for a linear model to extract
+  when competing against stronger win-rate features.
+
+This suggests the ~55% ceiling isn't a missing-features problem — it's
+closer to the actual predictability limit of win-rate-based signals for
+this dataset. Moving beyond it likely needs either a non-linear model
+capable of interactions the logistic regression can't represent (v2), or
+denser per-team-map data (a known limitation, see above), rather than more
+features of the same kind.
