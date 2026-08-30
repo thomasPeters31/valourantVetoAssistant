@@ -16,7 +16,7 @@
 
 import numpy as np
 import csv
-from analysis import buildFrequencyTable
+from analysis import buildFrequencyTable, safeRate
 from features import buildDataset, buildMapVocab
 
 def sigmoid(z):
@@ -81,13 +81,14 @@ if __name__ == "__main__":
     # Win-rate lookups built only from training rows, then reused to build
     # features for both splits — the test set's features still only reflect
     # what was knowable at training time, avoiding leakage.
-    played, wins, teamPlayed, teamWins = buildFrequencyTable(trainRows)
+    (played, wins, teamPlayed, teamWins,
+    attackWon, attackPlayed, defenceWon, defencePlayed) = buildFrequencyTable(trainRows)
     mapVocab = buildMapVocab(trainRows)
 
-    XTrain, yTrain = buildDataset(trainRows, played, wins, teamPlayed, teamWins, mapVocab)
-    XTest, yTest = buildDataset(testRows, played, wins, teamPlayed, teamWins, mapVocab)
+    XTrain, yTrain = buildDataset(trainRows, played, wins, teamPlayed, teamWins, attackWon, attackPlayed, defenceWon, defencePlayed, mapVocab)
+    XTest, yTest = buildDataset(trainRows, played, wins, teamPlayed, teamWins, attackWon, attackPlayed, defenceWon, defencePlayed, mapVocab)
 
-    weights, bias = train(XTrain, yTrain, epochs=5000)
+    weights, bias = train(XTrain, yTrain, epochs=15000)
 
     # Predicted probabilities >= 0.5 count as a predicted "team1 win" (see
     # features.buildFeatures for how team1/label are defined).
@@ -99,3 +100,8 @@ if __name__ == "__main__":
     
     accuracy = np.mean(predictedLabels == yTest)
     print(f"Test accuracy: {accuracy * 100:.1f}%")
+    
+    row = testRows[0]
+    teamA = row["teamID_a"]
+    print(f"This match's actual attack_a: {row['attack_a']}, defence_a: {row['defence_a']}")
+    print(f"Team's historical attack rate: {safeRate(attackWon[teamA], attackPlayed[teamA]):.3f}")  
