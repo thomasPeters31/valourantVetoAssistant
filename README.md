@@ -157,34 +157,31 @@ capable of interactions the logistic regression can't represent (v2), or
 denser per-team-map data (a known limitation, see above), rather than more
 features of the same kind.
 
-## v1.2: attack/defence round rates
+## v1.2: attack/defence round rates (tested, not adopted)
 
-Added each team's historical attack-side and defence-side round win rate
-(computed from round counts already in `mapResults.csv`, tracked via the
-same fallback-style frequency table as the map win rate).
+Added each team's historical attack-side and defence-side round win rate,
+built from round counts already present in `mapResults.csv`.
+
+Initial testing showed a large accuracy jump (68%+), but this turned out to
+be an evaluation bug — a variable mix-up meant the model was briefly being
+tested on its own training data rather than held-out matches. Once fixed:
 
 | Model | Test accuracy |
 |---|---|
-| v1 (4 features) | 55.1-56.6% (stable across splits) |
-| v1.1 (+ pick, map identity) | 55.5% (no improvement) |
-| v1.2 (+ attack/defence rates) | **68.2-68.6%** (stable across splits) |
+| v1 (4 features) | 55.1-56.6% |
+| v1.1 (+ pick, map identity) | 55.5% |
+| v1.2 (+ attack/defence rates) | 55.3% |
 
-This is a substantial jump, and was verified rather than taken at face
-value: the round-counting logic was checked against an independent
-from-scratch reimplementation (exact match), leakage was ruled out by
-confirming a team's historical rate is built entirely from other matches
-(not the match being predicted), the result held stable across three
-different train/test splits, and training accuracy matched test accuracy
-(68.5% vs 68.2-68.6%), ruling out overfitting.
+No improvement over v1, consistent with v1.1. The trained weights show
+attack/defence features contribute real but modest weight (roughly a fifth
+of the map win-rate features), which is consistent with this outcome —
+a moderate signal that doesn't shift the model's overall accuracy beyond
+the existing ~55% ceiling.
 
-**Why loss barely moved while accuracy jumped ~13 points:** loss is a
-smooth measure sensitive to confidence on every prediction; accuracy is a
-hard 0.5 threshold. The trained weights show attack/defence features
-contribute moderately (roughly a fifth the weight of the map win-rate
-features) rather than dominating — consistent with a large number of
-borderline predictions being tipped across the 0.5 line without much
-change to the model's overall confidence calibration.
-
-**Conclusion:** round-level performance data carries meaningfully more
-signal than map win/loss alone. A map result compresses 13-20 rounds into a
-single win/loss bit; feeding round outcomes in more directly recovers
+**Lesson learned in the process:** the initial 68% result passed three
+genuine checks (independent reimplementation of the round-counting logic,
+no data leakage, stability across three train/test splits) before a fourth
+check — comparing train and test accuracy — accidentally used the same
+data for both, producing a false confirmation. Re-running with the correct
+split showed the true result. Kept here as a reminder to verify *which
+data* a check is actually using, not just whether the check passes.

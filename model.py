@@ -86,7 +86,7 @@ if __name__ == "__main__":
     mapVocab = buildMapVocab(trainRows)
 
     XTrain, yTrain = buildDataset(trainRows, played, wins, teamPlayed, teamWins, attackWon, attackPlayed, defenceWon, defencePlayed, mapVocab)
-    XTest, yTest = buildDataset(trainRows, played, wins, teamPlayed, teamWins, attackWon, attackPlayed, defenceWon, defencePlayed, mapVocab)
+    XTest, yTest = buildDataset(testRows, played, wins, teamPlayed, teamWins, attackWon, attackPlayed, defenceWon, defencePlayed, mapVocab)
 
     weights, bias = train(XTrain, yTrain, epochs=15000)
 
