@@ -18,6 +18,7 @@ import numpy as np
 import csv
 from analysis import buildFrequencyTable, safeRate
 from features import buildDataset, buildMapVocab
+import torch
 
 def sigmoid(z):
     # Squashes any real-valued score into a (0, 1) probability.
@@ -66,6 +67,8 @@ def train(X, Y, learningRate=0.1, epochs=5000):
 
     return weights, bias
 
+
+
 if __name__ == "__main__":
     with open("mapResults.csv") as f:
         rows = list(csv.DictReader(f))
@@ -86,7 +89,7 @@ if __name__ == "__main__":
     mapVocab = buildMapVocab(trainRows)
 
     XTrain, yTrain = buildDataset(trainRows, played, wins, teamPlayed, teamWins, attackWon, attackPlayed, defenceWon, defencePlayed, mapVocab)
-    XTest, yTest = buildDataset(testRows, played, wins, teamPlayed, teamWins, attackWon, attackPlayed, defenceWon, defencePlayed, mapVocab)
+    XTest, yTest = buildDataset(testRows, played, wins, teamPlayed, teamWins, attackWon, attackPlayed, defenceWon, defencePlayed, mapVocab)    
 
     weights, bias = train(XTrain, yTrain, epochs=15000)
 
