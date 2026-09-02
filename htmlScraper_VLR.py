@@ -7,15 +7,16 @@
 #                            build a numpy feature/label dataset for modeling
 #
 # Run this file directly (`python htmlScraper_VLR.py`) to (re)build
-# mapResults.csv from scratch — see rebuildMapResults() at the bottom.
-# Every match page fetched is cached under cache/<name>.html, so re-running
-# only makes network requests for matches that aren't cached yet.
+# mapResults.csv from scratch — see rebuildMapResultsFromRegion() at the
+# bottom. Every match page fetched is cached under cache/<id>.html, so
+# re-running only makes network requests for matches that aren't cached yet.
 
 import requests
 import os
 from bs4 import BeautifulSoup
 import time
 import csv
+import re
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
@@ -99,8 +100,12 @@ def getHtml(url, cacheName, useCache=True):
 
     return response.text
 
+
 def getMatchIDs(pageNumber):
-    # Scrapes one page of VLR's results listing for the match IDs on it.
+    # Scrapes one page of VLR's GLOBAL results listing for the match IDs on it.
+    # Kept around for the old sweep-everything approach (see rebuildMapResults
+    # below) — superseded as the default by the event-based discovery further
+    # down, but still useful if you ever want an unfiltered top-up.
     url = f"https://www.vlr.gg/matches/results?page={pageNumber}"
     # useCache=False: this listing changes constantly as new results land,
     # so a cached copy would quickly go stale.
@@ -121,15 +126,82 @@ def getMatchIDs(pageNumber):
 
     return matchIDs
 
+
 def getAllMatchIDs(numPages):
-    # Walks the results listing page by page (1-indexed) and flattens every
-    # match ID found into one list. Used by both getMoreData() and
-    # rebuildMapResults() to discover which matches exist on VLR right now.
+    # Walks the GLOBAL results listing page by page (1-indexed) and flattens
+    # every match ID found into one list. Sweeps every region/tier — this is
+    # the source of the team-map sparsity problem the event-based approach
+    # below is meant to fix.
     allIDs = []
     for page in range(1, numPages + 1):
         ids = getMatchIDs(page)
         allIDs.extend(ids)
     return allIDs
+
+
+def getEventIDs(region, tier, maxPages=10, minYear=2023):
+    eventIDs = []
+
+    for page in range(1, maxPages + 1):
+        url = f"https://www.vlr.gg/events/?region={region}&tier={tier}&page={page}"
+        html = getHtml(url, f"events_{region}_{tier}_page_{page}", useCache=False)
+        soup = BeautifulSoup(html, "html.parser")
+
+        cards = soup.select("a.event-item")
+        if not cards:
+            break
+
+        for card in cards:
+            parts = card['href'].split('/')
+            eventID = parts[2]
+            slug = parts[3]
+
+            yearMatch = re.search(r"20\d{2}", slug)
+            if not yearMatch or int(yearMatch.group()) < minYear:
+                continue  # pre-franchise era: different team pool, different page template
+
+            eventIDs.append((eventID, slug))
+
+    return eventIDs
+
+
+def getMatchIDsFromEvent(eventID, slug):
+    # Scrapes one event's match listing for the match IDs on it. Same
+    # match-card / "Map" tag filter as getMatchIDs, pointed at a single
+    # event instead of the global feed.
+    url = f"https://www.vlr.gg/event/matches/{eventID}/{slug}/"
+    # useCache=True: a completed event's match list is finished changing,
+    # unlike the live global results feed above.
+    html = getHtml(url, f"event_{eventID}_matches", useCache=True)
+    soup = BeautifulSoup(html, "html.parser")
+
+    matchIDs = []
+    for card in soup.select("a.match-item"):
+        tags = card.select("div.match-item-vod div.wf-tag")
+        tagTexts = [t.get_text(strip=True) for t in tags]
+
+        if "Map" not in tagTexts:
+            continue
+
+        matchIDs.append(card['href'].split('/')[1])
+
+    return matchIDs
+
+
+def getAllMatchIDsFromRegion(region, tier):
+    # Discovers every match ID across every VCT-tier event in one region.
+    # This is the event-based replacement for getAllMatchIDs.
+    events = getEventIDs(region, tier)
+    print(f"Found {len(events)} events")
+
+    allIDs = []
+    for eventID, slug in events:
+        ids = getMatchIDsFromEvent(eventID, slug)
+        print(f"{slug}: {len(ids)} matches")
+        allIDs.extend(ids)
+
+    return allIDs
+
 
 def getMapResults(html):
     # Parses the per-map scoreline/side-score breakdown from a match page
@@ -186,6 +258,7 @@ def getMapResults(html):
 
     return results
 
+
 def getMatchTeams(html):
     # Pulls each team's ID and display name from the match header (as
     # opposed to parseTeam, which reads a team's per-map score block).
@@ -205,6 +278,7 @@ def getMatchTeams(html):
 
     return teams
 
+
 def parseTeam(teamDiv):
     # Pulls one team's name/score/side-scores out of a vm-stats-game-header
     # "div.team" block.
@@ -219,6 +293,8 @@ def parseTeam(teamDiv):
         "attack": int(teamDiv.select_one("span.mod-t").get_text(strip=True)),
         "defence": int(teamDiv.select_one("span.mod-ct").get_text(strip=True)),
     }
+
+
 def getMatchDate(html):
     # Reads the match's UTC timestamp from its header, used by analysis.py's
     # baseLineEvaluation() to sort matches chronologically for a time-based
@@ -231,82 +307,15 @@ def getMatchDate(html):
 
     return dateElement.get("data-utc-ts")
 
-def getMoreData():
-    # Incremental alternative to rebuildMapResults(): only fetches and
-    # appends matches not already present in mapResults.csv, instead of
-    # re-parsing every cached match page from scratch. Not currently called
-    # from __main__ (rebuildMapResults() is used there instead) — kept
-    # around as a faster option for topping up the dataset between full
-    # rebuilds.
 
-    # Load match IDs you've already scraped, so you don't refetch or duplicate them.
-        with open("mapResults.csv") as f:
-            existingIDs = {row["matchID"] for row in csv.DictReader(f)}
+def buildRowsFromMatchIDs(matchIDs):
+    # Shared by both rebuild paths below: given a list of match IDs, fetch
+    # each match page and turn it into per-map rows. This is the one place
+    # that logic lives, so the global sweep and the event-based scrape can't
+    # drift apart from each other the way append/rebuild did before.
+    rows = []
 
-        print(f"Already have {len(existingIDs)} matches")
-
-        # Pull IDs from pages 1-160. getMatchIDs re-fetches each results page fresh
-        # (useCache=False), but getHtml still caches individual match pages, so
-        # matches you've already scraped won't be re-downloaded below.
-        allIDs = getAllMatchIDs(160)
-        newIDs = [mid for mid in allIDs if mid not in existingIDs]
-
-        print(f"Found {len(newIDs)} new matches to scrape")
-
-        newRows = []
-
-        for matchID in newIDs:
-            html = getHtml(f"https://www.vlr.gg/{matchID}", f"match_{matchID}")
-            try:
-                maps = getMapResults(html)
-                headerTeams = getMatchTeams(html)
-                date = getMatchDate(html)
-
-                if len(headerTeams) != 2:
-                    print(f"SKIP {matchID}: found {len(headerTeams)} header teams")
-                    continue
-
-                for entry in maps:
-                    entry["matchID"] = matchID
-                    entry["teamID_a"] = headerTeams[0]["teamID"]
-                    entry["teamID_b"] = headerTeams[1]["teamID"]
-                    entry["date"] = date
-                    newRows.append(entry)
-
-                print(matchID, len(maps))
-            except Exception as e:
-                print(f"FAILED {matchID}: {type(e).__name__}: {e}")
-
-        # Append rather than overwrite — "a" mode adds to the end of the file
-        # instead of truncating it like "w" does.
-        with open("mapResults.csv", "a", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=[
-                "matchID", "map", "pickedBy",
-                "teamID_a", "team_a", "score_a", "attack_a", "defence_a",
-                "teamID_b", "team_b", "score_b", "attack_b", "defence_b",
-                "winner", "date"
-            ])
-            writer.writerows(newRows)   # no writeheader() — the header's already there
-
-        print(f"Appended {len(newRows)} rows to mapResults.csv")
-
-def rebuildMapResults(numPages):
-    # Gather every match ID we've ever seen, plus whatever's on the results
-    # pages now. Since match pages are cached, re-parsing old ones costs no
-    # extra network requests — only genuinely new match pages get fetched.
-    # This is the function __main__ calls, and it fully overwrites
-    # mapResults.csv (unlike getMoreData(), which only appends).
-    with open("mapResults.csv") as f:
-        existingIDs = {row["matchID"] for row in csv.DictReader(f)}
-
-    freshIDs = set(getAllMatchIDs(numPages))
-    allIDs = sorted(existingIDs | freshIDs)
-
-    print(f"Rebuilding from {len(allIDs)} total matches")
-
-    allRows = []
-
-    for matchID in allIDs:
+    for matchID in matchIDs:
         html = getHtml(f"https://www.vlr.gg/{matchID}", f"match_{matchID}")
         try:
             maps = getMapResults(html)
@@ -317,21 +326,24 @@ def rebuildMapResults(numPages):
                 print(f"SKIP {matchID}: found {len(headerTeams)} header teams")
                 continue
 
-            # Stitch match-level info (ID, both team IDs, date) onto every
-            # per-map row so each output row is self-contained — this is
-            # the shape analysis.py and features.py both expect to read.
             for entry in maps:
                 entry["matchID"] = matchID
                 entry["teamID_a"] = headerTeams[0]["teamID"]
                 entry["teamID_b"] = headerTeams[1]["teamID"]
                 entry["date"] = date
-                allRows.append(entry)
+                rows.append(entry)
 
         except Exception as e:
             # Keep going on a bad/unexpected page rather than aborting the
             # whole rebuild over one match.
             print(f"FAILED {matchID}: {type(e).__name__}: {e}")
 
+    return rows
+
+
+def writeMapResults(rows):
+    # Overwrites mapResults.csv with exactly these rows. Shared write path
+    # for both rebuild functions below.
     with open("mapResults.csv", "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=[
             "matchID", "map", "pickedBy", "date",
@@ -340,13 +352,68 @@ def rebuildMapResults(numPages):
             "winner",
         ])
         writer.writeheader()
-        writer.writerows(allRows)
+        writer.writerows(rows)
 
-    print(f"Wrote {len(allRows)} rows to mapResults.csv")
+    print(f"Wrote {len(rows)} rows to mapResults.csv")
+
+
+def getMoreData():
+    # Incremental alternative: only fetches matches not already present in
+    # mapResults.csv, appending rather than rebuilding. Sweeps the global
+    # feed (pages 1-160) — kept for topping up between full rebuilds.
+    with open("mapResults.csv") as f:
+        existingIDs = {row["matchID"] for row in csv.DictReader(f)}
+
+    print(f"Already have {len(existingIDs)} matches")
+
+    allIDs = getAllMatchIDs(160)
+    newIDs = [mid for mid in allIDs if mid not in existingIDs]
+
+    print(f"Found {len(newIDs)} new matches to scrape")
+
+    newRows = buildRowsFromMatchIDs(newIDs)
+
+    with open("mapResults.csv", "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            "matchID", "map", "pickedBy",
+            "teamID_a", "team_a", "score_a", "attack_a", "defence_a",
+            "teamID_b", "team_b", "score_b", "attack_b", "defence_b",
+            "winner", "date"
+        ])
+        writer.writerows(newRows)   # no writeheader() — the header's already there
+
+    print(f"Appended {len(newRows)} rows to mapResults.csv")
+
+
+def rebuildMapResults(numPages):
+    # Old approach: sweep every region/tier via the global results feed.
+    # Fully overwrites mapResults.csv.
+    with open("mapResults.csv") as f:
+        existingIDs = {row["matchID"] for row in csv.DictReader(f)}
+
+    freshIDs = set(getAllMatchIDs(numPages))
+    allIDs = sorted(existingIDs | freshIDs)
+
+    print(f"Rebuilding from {len(allIDs)} total matches")
+
+    rows = buildRowsFromMatchIDs(allIDs)
+    writeMapResults(rows)
+
+
+def rebuildMapResultsFromRegion(region, tier):
+    # New approach: only matches from VCT-tier events in one region.
+    # Denser per-team-map data, at the cost of a smaller total dataset.
+    # Fully overwrites mapResults.csv.
+    matchIDs = sorted(set(getAllMatchIDsFromRegion(region, tier)))
+
+    print(f"Rebuilding from {len(matchIDs)} total matches")
+
+    rows = buildRowsFromMatchIDs(matchIDs)
+    writeMapResults(rows)
 
 
 if __name__ == "__main__":
-    # Rebuilds mapResults.csv from the first 160 pages of VLR's results
-    # listing (~4000 matches at 25/page) plus any match IDs already on
-    # disk. This is the file analysis.py and features.py both read.
-    rebuildMapResults(160)
+    # Region-based build: VCT Americas only (region=26, tier=60).
+    # Swap the region code to expand to another league later —
+    # everything else in the pipeline is region-agnostic.
+    rebuildMapResultsFromRegion(26, 60)
