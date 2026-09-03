@@ -21,9 +21,21 @@ whether a more expressive architecture could do better.
 
 ## Data
 
-Scraped from VLR.gg: roughly 7,800 professional matches across all regions
-and over two years, giving 18,414 map results. The scraper caches every
-page locally so re-runs don't hit the site again.
+Two scraping approaches were used, in sequence, as the sparsity problem
+below was diagnosed and addressed:
+
+**v1–v2 (global sweep):** every match across every region and tier,
+scraped from VLR's general results feed. ~7,800 matches, 18,414 map
+results. This is where the sparsity problem was first identified.
+
+**v3 (event-based, region + tier filtered):** VLR's per-event match
+listings, targeted at specific VCT-tier events by region. Event IDs are
+auto-discovered from VLR's events listing (`vlr.gg/events/?region=X&tier=60`)
+rather than hardcoded, filtered to 2023+ (the franchise era) and to the
+target region's own events — excluding international events (Masters,
+Champions, Lock-In), qualifiers, and developmental circuits (e.g. China
+Evolution Series), all of which either mix in opponents outside the
+target region or belong to a different competitive tier entirely.
 
 Two datasets, joined on match ID:
 
@@ -31,18 +43,17 @@ Two datasets, joined on match ID:
 - `mapResults.csv` — one row per map played, with scores, attack/defence
   splits, team IDs, match date, and which team picked it
 
-**Known limitation:** matches older than roughly mid-2024 fail to parse,
-because VLR's page structure changed at some point and the scraper's
-selectors no longer match.
+**Known limitation:** pre-2023 matches use a different VLR page template
+and fail to parse (`parseTeam`'s `div.score` selector doesn't match). The
+v3 pipeline avoids this by filtering to 2023+ at the source; it only
+affects the legacy v1–v2 global sweep.
 
-**Known limitation, and the central constraint on this whole project:**
-most team-map pairs are sparse — the majority have three games or fewer,
-because the scrape sweeps every region and tier rather than a single
-league. This is why every model here falls back to a team's overall win
-rate, or 50%, when a specific team-map pair doesn't have enough data
-(currently a 10-game threshold) to be trusted. As the results below show,
-this sparsity turned out to be the actual limiting factor on accuracy —
-more so than model choice or feature choice.
+**Known limitation, resolved for single-region data, not for multi-region:**
+the global sweep's team-map pairs were mostly sparse (three games or
+fewer for the majority), because it swept every region and tier
+indiscriminately. Region + tier filtering fixes this within a single
+region. It does **not** fully fix it across multiple regions — see the v3
+results below for why.
 
 ## Initial findings
 
@@ -64,7 +75,7 @@ These numbers set a realistic ceiling for the model. Map outcomes carry
 limited signal, so any claim of high predictive accuracy would more likely
 indicate overfitting or leakage than a genuine result.
 
-## Results: a systematic search for what actually helps
+## Results: a systematic search for what actually helps (v1–v2, global sweep)
 
 Every model below was evaluated with a **time-based train/test split**
 (trained on the earliest matches by date, tested on the most recent) to
@@ -109,22 +120,58 @@ split proportions (75/25, 80/20, 90/10), not just one.
   the limiting factor: a more capable model found nothing extra to
   exploit in the features available.
 
-### Conclusion
+## Results: fixing the sparsity problem (v3)
 
-Four different levers were tried — richer features (pick, map identity),
-finer-grained features (round-level data), and a more expressive model
-(neural network) — and none moved accuracy beyond the ~55% ceiling
-established by the simplest baseline. Combined with the known sparsity of
-per-team-map data (most pairs have 3 games or fewer), the evidence points
-toward **data density, not modelling choice, as the actual constraint**.
+The global sweep's density problem, measured directly: bucket every
+team-map pair by how many games it has, as a share of all unique pairs.
+
+| Dataset | ≤3 games | 11+ games | n (pairs) | Baseline accuracy (80/20) | Test n |
+|---|---|---|---|---|---|
+| v1–v2: global sweep, all regions/tiers | 57.5% | 13.1% | 7,302 | 55.6% | 3,683 |
+| v3: Americas only, VCT tier, 2023+ | 25.7% | 49.2% | 179 | 58.5% | 195 |
+| v3: 4 regions, VCT tier, 2023+ | 31.2% | 34.2% | 737 | 52.4% | 660 |
+
+**Americas-only is the clean win.** Filtering to one region's partnered
+league cuts the sparse-pair rate by more than half and pushes almost half
+of all pairs into the well-populated 11+ bucket. The tie rate in
+`baseLineEvaluation` (how often the frequency table has too little data
+to commit to a prediction) dropped from 5.1% to 1.5% — a more reliable
+signal than the accuracy figure itself, since it isn't sensitive to which
+matches happened to land in a small test set. The 58.5% accuracy figure
+should be read cautiously though: at n=195, the margin of error is
+roughly ±7 points, so it's suggestive rather than conclusive on its own.
+
+**Widening to 4 regions did not help, and the reason is structural, not a
+bug.** The initial hypothesis — leftover qualifier/developmental events
+leaking through the filter — was tested and partially confirmed (China
+Evolution Series and LCQ events were found and excluded), but the deeper
+cause survived that fix: **partnered team rosters change across seasons**
+(e.g. Full Sense replacing Talon and Varrel being promoted via Ascension,
+both into VCT Pacific for the 2026 season). Four regions across four
+seasons of promotion/relegation produces 64 distinct team names, well
+above what a single season's rosters would suggest, and a meaningful
+share of them have almost no history before their promotion — reproducing
+the sparsity problem the region filter was built to solve, through squad
+turnover rather than dataset construction. This was verified by checking
+individual team histories against public sources rather than assumed.
+
+**Decision:** build forward on the Americas-only dataset (971 matches,
+58.5% baseline), not the 4-region one. The 4-region attempt is a real,
+documented result — evidence that per-team history depth matters more
+than raw match count, and that roster churn is a genuine limitation of
+this approach — kept here rather than discarded because it strengthens
+the original sparsity finding rather than contradicting it.
 
 ## Roadmap
 
-- **v3** — scrape full seasons of specific VCT regional leagues (Americas,
-  EMEA, Pacific, China) rather than sweeping every region and tier, to
-  produce denser per-team-map data. This is the direct response to the
-  finding above, and the most promising remaining lever.
+- **v3 — done.** Event-based, region + tier filtered scraping, auto-discovered
+  via VLR's events listing. Fixed sparsity for single-region data;
+  identified roster churn as a remaining limitation for multi-region data.
+- **v3.1 — in progress.** Retest the v1.2 attack/defence round-rate
+  features (previously no improvement, on sparse data) against the new
+  dense Americas-only dataset. The feature and evaluation code already
+  exists unchanged from v1.2; only the underlying data has changed.
 - **v4** — sequence modelling over match history (recent form, streaks)
-  rather than static career-average rates, once v3 provides enough
-  per-team data to make sequences meaningful.
+  rather than static career-average rates, once there's enough per-team
+  data to make sequences meaningful.
 - **v5** — web interface for the manager to query a matchup directly.

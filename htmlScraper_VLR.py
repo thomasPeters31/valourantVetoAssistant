@@ -17,8 +17,19 @@ from bs4 import BeautifulSoup
 import time
 import csv
 import re
+from tqdm import tqdm
+from collections import Counter
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
+
+REGION_KEYWORDS = {
+    26: "americas",
+    27: "emea",
+    28: "pacific",
+    24: "china",
+}
+
+EXCLUDE_KEYWORDS = ["qualifier", "evolution-series"]
 
 
 def getVetoSequence(html):
@@ -60,7 +71,7 @@ def getVetoSequence(html):
             # Doesn't match either known shape, meaning VLR changed its
             # format or this note is worded differently. Flag it instead
             # of silently dropping a veto step.
-            print(f"Unexpected segment format: {segment}")
+            tqdm.write(f"Unexpected segment format: {segment}")
             continue
 
         veto.append(entry)
@@ -79,20 +90,20 @@ def getHtml(url, cacheName, useCache=True):
         with open(path, "r") as f:
             return f.read()
 
-    print(f"Fetching {cacheName}...")
+    tqdm.write(f"Fetching {cacheName}...")
     try:
         response = requests.get(url, headers=HEADERS, timeout=10)
     except requests.exceptions.RequestException as e:
         # Network-level failure (timeout, DNS, connection reset, etc.) —
         # give up on this page and let the caller deal with "".
-        print(f"Request failed for {url}: {e}")
+        tqdm.write(f"Request failed for {url}: {e}")
         return ""
     # Small delay so a batch of uncached requests doesn't hammer VLR.gg.
     time.sleep(3)
 
     if response.status_code != 200:
         # e.g. 404/429/5xx — don't cache a bad response as if it were real data.
-        print(f"Failed to fetch {url}: {response.status_code}")
+        tqdm.write(f"Failed to fetch {url}: {response.status_code}")
         return ""
 
     with open(path, "w") as f:
@@ -139,8 +150,9 @@ def getAllMatchIDs(numPages):
     return allIDs
 
 
-def getEventIDs(region, tier, maxPages=10, minYear=2023):
+def getEventIDs(region, tier, maxPages=10, minYear=2023, regionOnly=True):
     eventIDs = []
+    keyword = REGION_KEYWORDS.get(region)
 
     for page in range(1, maxPages + 1):
         url = f"https://www.vlr.gg/events/?region={region}&tier={tier}&page={page}"
@@ -158,7 +170,13 @@ def getEventIDs(region, tier, maxPages=10, minYear=2023):
 
             yearMatch = re.search(r"20\d{2}", slug)
             if not yearMatch or int(yearMatch.group()) < minYear:
-                continue  # pre-franchise era: different team pool, different page template
+                continue
+
+            if regionOnly and keyword and keyword not in slug.lower():
+                continue
+
+            if any(bad in slug.lower() for bad in EXCLUDE_KEYWORDS):
+                continue
 
             eventIDs.append((eventID, slug))
 
@@ -192,12 +210,12 @@ def getAllMatchIDsFromRegion(region, tier):
     # Discovers every match ID across every VCT-tier event in one region.
     # This is the event-based replacement for getAllMatchIDs.
     events = getEventIDs(region, tier)
-    print(f"Found {len(events)} events")
+    tqdm.write(f"Found {len(events)} events")
 
     allIDs = []
     for eventID, slug in events:
         ids = getMatchIDsFromEvent(eventID, slug)
-        print(f"{slug}: {len(ids)} matches")
+        tqdm.write(f"{slug}: {len(ids)} matches")
         allIDs.extend(ids)
 
     return allIDs
@@ -315,7 +333,7 @@ def buildRowsFromMatchIDs(matchIDs):
     # drift apart from each other the way append/rebuild did before.
     rows = []
 
-    for matchID in matchIDs:
+    for matchID in tqdm(matchIDs, desc="Scraping matches"):
         html = getHtml(f"https://www.vlr.gg/{matchID}", f"match_{matchID}")
         try:
             maps = getMapResults(html)
@@ -323,7 +341,7 @@ def buildRowsFromMatchIDs(matchIDs):
             date = getMatchDate(html)
 
             if len(headerTeams) != 2:
-                print(f"SKIP {matchID}: found {len(headerTeams)} header teams")
+                tqdm.write(f"SKIP {matchID}: found {len(headerTeams)} header teams")
                 continue
 
             for entry in maps:
@@ -334,9 +352,7 @@ def buildRowsFromMatchIDs(matchIDs):
                 rows.append(entry)
 
         except Exception as e:
-            # Keep going on a bad/unexpected page rather than aborting the
-            # whole rebuild over one match.
-            print(f"FAILED {matchID}: {type(e).__name__}: {e}")
+            tqdm.write(f"FAILED {matchID}: {type(e).__name__}: {e}")
 
     return rows
 
@@ -354,7 +370,7 @@ def writeMapResults(rows):
         writer.writeheader()
         writer.writerows(rows)
 
-    print(f"Wrote {len(rows)} rows to mapResults.csv")
+    tqdm.write(f"Wrote {len(rows)} rows to mapResults.csv")
 
 
 def getMoreData():
@@ -364,12 +380,12 @@ def getMoreData():
     with open("mapResults.csv") as f:
         existingIDs = {row["matchID"] for row in csv.DictReader(f)}
 
-    print(f"Already have {len(existingIDs)} matches")
+    tqdm.write(f"Already have {len(existingIDs)} matches")
 
     allIDs = getAllMatchIDs(160)
     newIDs = [mid for mid in allIDs if mid not in existingIDs]
 
-    print(f"Found {len(newIDs)} new matches to scrape")
+    tqdm.write(f"Found {len(newIDs)} new matches to scrape")
 
     newRows = buildRowsFromMatchIDs(newIDs)
 
@@ -382,7 +398,7 @@ def getMoreData():
         ])
         writer.writerows(newRows)   # no writeheader() — the header's already there
 
-    print(f"Appended {len(newRows)} rows to mapResults.csv")
+    tqdm.write(f"Appended {len(newRows)} rows to mapResults.csv")
 
 
 def rebuildMapResults(numPages):
@@ -394,7 +410,7 @@ def rebuildMapResults(numPages):
     freshIDs = set(getAllMatchIDs(numPages))
     allIDs = sorted(existingIDs | freshIDs)
 
-    print(f"Rebuilding from {len(allIDs)} total matches")
+    tqdm.write(f"Rebuilding from {len(allIDs)} total matches")
 
     rows = buildRowsFromMatchIDs(allIDs)
     writeMapResults(rows)
@@ -406,14 +422,22 @@ def rebuildMapResultsFromRegion(region, tier):
     # Fully overwrites mapResults.csv.
     matchIDs = sorted(set(getAllMatchIDsFromRegion(region, tier)))
 
-    print(f"Rebuilding from {len(matchIDs)} total matches")
+    tqdm.write(f"Rebuilding from {len(matchIDs)} total matches")
+
+    rows = buildRowsFromMatchIDs(matchIDs)
+    writeMapResults(rows)
+    
+def rebuildMapResultsFromRegions(regions, tier):
+    matchIDs = set()
+    for region in regions:
+        matchIDs.update(getAllMatchIDsFromRegion(region, tier))
+
+    matchIDs = sorted(matchIDs)
+    tqdm.write(f"Rebuilding from {len(matchIDs)} total matches across {len(regions)} regions")
 
     rows = buildRowsFromMatchIDs(matchIDs)
     writeMapResults(rows)
 
 
 if __name__ == "__main__":
-    # Region-based build: VCT Americas only (region=26, tier=60).
-    # Swap the region code to expand to another league later —
-    # everything else in the pipeline is region-agnostic.
     rebuildMapResultsFromRegion(26, 60)

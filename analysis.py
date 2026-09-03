@@ -172,11 +172,13 @@ def baseLineEvaluation():
 
      print(f"Training on {len(trainRows)} rows, testing on {len(testRows)} rows")
 
-     played, wins, teamPlayed, teamWins = buildFrequencyTable(trainRows)
+     played, wins, teamPlayed, teamWins, attackRoundsWon, attackRoundsPlayed, defenceRoundsWon, defenceRoundsPlayed = buildFrequencyTable(trainRows)
 
      correctPredictions = 0
      totalPredictions = 0
      ties = 0
+     
+     
 
      for row in testRows:
           teamA = row["teamID_a"]
@@ -206,24 +208,57 @@ def baseLineEvaluation():
 
           if predictedWinner == winner:
                correctPredictions += 1
-
+               
           totalPredictions += 1
+          
+     regionTeams = set()
+     for row in testRows:
+          regionTeams.add(row["team_a"])
+          regionTeams.add(row["team_b"])
 
-
+     print(len(regionTeams))
+     print(regionTeams)
+          
 
      print(f"Baseline accuracy: {correctPredictions}/{totalPredictions} = {correctPredictions / totalPredictions * 100:.1f}%")
      print(f"Number of ties: {ties}/{totalPredictions} = {ties / totalPredictions * 100:.1f}%")
 
+def densityReport(csvPath):
+     with open(csvPath) as f:
+          rows = list(csv.DictReader(f))
+          
+     counts = list(buildFrequencyTable(rows)[0].values())
+     
+     exactCounts = Counter(counts)
+     buckets = {"1": 0, "2": 0, "3": 0, "4-5": 0, "6-10": 0, "11+": 0}
+     
+     for gameCount, pairCount in exactCounts.items():
+          if gameCount == 1:
+               buckets["1"] += pairCount
+          elif gameCount == 2:
+               buckets["2"] += pairCount
+          elif gameCount == 3:
+               buckets["3"] += pairCount
+          elif gameCount <= 5:
+               buckets["4-5"] += pairCount
+          elif gameCount <= 10:
+               buckets["6-10"] += pairCount
+          else:
+               buckets["11+"] += pairCount
+     
+     totalPairs = sum(exactCounts.values())
+     
+     for label, count in buckets.items():
+          print(f"{label}: {count} ({count / totalPairs * 100:.1f}%)")
+     
+     sparsePairs = buckets["1"] + buckets["2"] + buckets["3"]
+     print(f"Pairs with <=3 games: {sparsePairs}/{totalPairs} = {sparsePairs / totalPairs * 100:.1f}%")
+     
+     return buckets
+     
 if __name__ == "__main__":
-     with open("mapResults.csv") as f:
-        rows = list(csv.DictReader(f))
      
+     print("\n=== NEW (region + tier filtered) ===")
+     densityReport("mapResults.csv")
      
-     
-     (played, wins, teamPlayed, teamWins,
-     attackWon, attackPlayed, defenceWon, defencePlayed) = buildFrequencyTable(rows)
-
-     testTeam = rows[0]["teamID_a"]
-     print(verifyTeam(testTeam, rows))
-     print(f"Attack: {attackWon[testTeam]}/{attackPlayed[testTeam]}")
-     print(f"Defence: {defenceWon[testTeam]}/{defencePlayed[testTeam]}")
+     baseLineEvaluation()

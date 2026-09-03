@@ -5,3 +5,4 @@ __pycache__/
 vetoData.csv
 cache/
 mapResults.csv
+mapResultsOld.csv
